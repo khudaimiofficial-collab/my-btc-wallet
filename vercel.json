@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/speed/:path*",
-      "destination": "https://api.tryspeed.com/v1/:path*"
+      "destination": "https://api.tryspeed.com/:path*"
     }
   ]
 }
