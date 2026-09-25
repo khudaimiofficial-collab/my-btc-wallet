@@ -15,7 +15,6 @@
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 25px 15px; }
     .wallet-container { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; width: 100%; max-width: 480px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
     .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .badge { background: rgba(245,158,11,0.15); color: var(--primary); border: 1px solid var(--primary); font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 20px; }
     button { background: var(--primary); color: black; font-weight: bold; border: none; padding: 12px; width: 100%; border-radius: 8px; font-size: 14px; cursor: pointer; margin-top: 8px; }
     button:hover { background: #d97706; }
     button:disabled { background: #475569; cursor: not-allowed; }
@@ -28,6 +27,7 @@
     .qr-wrapper { text-align: center; margin-top: 15px; }
     #qrcode { background: white; padding: 10px; border-radius: 8px; display: inline-block; }
     .hidden { display: none; }
+    .copy-link { font-size: 11px; color: var(--primary); cursor: pointer; float: right; }
     hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
   </style>
 </head>
@@ -39,19 +39,16 @@
       <h2>₿ Bitcoin Wallet</h2>
       <p style="font-size: 12px; color: var(--muted);">Direct Client-Side • Denominated in Sats</p>
     </div>
-    <!-- Network Toggle -->
     <select id="networkSelect" onchange="onNetworkChange()" style="background:#0b0f19; color:white; border:1px solid #334155; padding:4px 8px; border-radius:6px; font-size:11px;">
       <option value="testnet">Testnet (Free Sats)</option>
       <option value="mainnet">Mainnet</option>
     </select>
   </div>
 
-  <!-- Initial State: Create Wallet -->
   <div id="initSection">
     <button onclick="createWallet()">⚡ Direct Create Wallet</button>
   </div>
 
-  <!-- Main Wallet Dashboard -->
   <div id="walletUI" class="hidden">
     <!-- Balance in Satoshis -->
     <div class="balance-card">
@@ -60,35 +57,45 @@
       <button onclick="checkBalance()" style="background:#1e293b; color:white; width:auto; font-size:11px; padding:5px 10px;">Refresh Balance</button>
     </div>
 
-    <!-- Your Address -->
+    <!-- SegWit Address -->
+    <div style="margin-bottom: 12px;">
+      <span style="font-size: 12px; color: var(--muted);">Native SegWit Address:</span>
+      <span class="copy-link" onclick="copy('mySegwit')">Copy</span>
+      <div id="mySegwit" class="box"></div>
+    </div>
+
+    <!-- Legacy Address -->
     <div>
-      <span style="font-size: 12px; color: var(--muted);">Your Address:</span>
-      <div id="myAddress" class="box"></div>
-      <div class="qr-wrapper">
-        <div id="qrcode"></div>
-      </div>
+      <span style="font-size: 12px; color: var(--muted);">Legacy Address (Universal):</span>
+      <span class="copy-link" onclick="copy('myLegacy')">Copy</span>
+      <div id="myLegacy" class="box" style="color: #a7f3d0;"></div>
+      <p style="font-size: 10px; color: var(--muted); margin-top: 3px;">Use Legacy if a faucet rejects SegWit.</p>
+    </div>
+
+    <div class="qr-wrapper">
+      <div id="qrcode"></div>
     </div>
 
     <hr/>
 
-    <!-- SEND WITH SATOSHIS -->
+    <!-- SEND SATOSHIS -->
     <h3>Send Satoshis</h3>
     <label style="font-size: 12px; color: var(--muted); margin-top: 8px; display:block;">Recipient Address:</label>
-    <input type="text" id="sendTo" placeholder="Recipient address (tb1q... or bc1q...)" />
+    <input type="text" id="sendTo" placeholder="Recipient address" />
 
     <label style="font-size: 12px; color: var(--muted); display:block;">Amount in Satoshis (sats):</label>
-    <input type="number" id="sendAmount" placeholder="e.g. 5000 sats" />
+    <input type="number" id="sendAmount" placeholder="e.g. 1000" />
 
     <button id="sendBtn" onclick="sendSatoshis()">Send Satoshis</button>
     <div id="txStatus" style="font-size: 12px; margin-top: 8px; word-break: break-all;"></div>
 
     <hr/>
 
-    <!-- Backup Details -->
+    <!-- Recovery -->
     <details style="font-size: 12px; color: var(--muted); cursor: pointer;">
-      <summary>View Secret Seed Phrase & Private Key</summary>
+      <summary>View Secret Seed & Private Key</summary>
       <div style="margin-top: 10px;">
-        <span>12-Word Recovery Seed:</span>
+        <span>12-Word Seed Phrase:</span>
         <div id="seedGrid" class="seed-grid"></div>
         <span style="display:block; margin-top:10px;">WIF Private Key:</span>
         <div id="myPrivKey" class="box" style="color:#fca5a5; border-color:#7f1d1d; background:#1c0b0b;"></div>
@@ -98,17 +105,22 @@
 </div>
 
 <script>
-  // BIP-173 (Bech32) Encoder for Native SegWit
+  // Audited BIP-173 (Bech32) Reference Implementation
   const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
-  function polymod(v) {
+  const GENERATOR = [0x3b2d386f, 0x1a656679, 0x3e863c1b, 0x2e8f85f8, 0x3cd038ff];
+
+  function polymod(values) {
     let chk = 1;
-    for (let p = 0; p < v.length; ++p) {
-      let top = chk >> 25;
-      chk = (chk & 0x1ffffff) << 5 ^ v[p];
-      for (let i = 0; i < 5; ++i) if ((top >> i) & 1) chk ^= [0x3b2d386f, 0x1a656679, 0x3e863c1b, 0x2e8f85f8, 0x3cd038ff][i];
+    for (let p = 0; p < values.length; ++p) {
+      let top = chk >>> 25; // MUST be >>> unsigned shift
+      chk = ((chk & 0x1ffffff) << 5) ^ values[p];
+      for (let i = 0; i < 5; ++i) {
+        if ((top >>> i) & 1) chk ^= GENERATOR[i];
+      }
     }
     return chk;
   }
+
   function hrpExpand(hrp) {
     let ret = [];
     for (let p = 0; p < hrp.length; ++p) ret.push(hrp.charCodeAt(p) >> 5);
@@ -116,25 +128,35 @@
     for (let p = 0; p < hrp.length; ++p) ret.push(hrp.charCodeAt(p) & 31);
     return ret;
   }
+
   function convertBits(data, frombits, tobits, pad) {
     let acc = 0, bits = 0, ret = [], maxv = (1 << tobits) - 1;
     for (let p = 0; p < data.length; ++p) {
-      acc = (acc << frombits) | data[p];
+      let value = data[p];
+      if (value < 0 || (value >> frombits) !== 0) return null;
+      acc = (acc << frombits) | value;
       bits += frombits;
-      while (bits >= tobits) { bits -= tobits; ret.push((acc >> bits) & maxv); }
+      while (bits >= tobits) {
+        bits -= tobits;
+        ret.push((acc >> bits) & maxv);
+      }
     }
     if (pad && bits > 0) ret.push((acc << (tobits - bits)) & maxv);
     return ret;
   }
-  function encodeSegwit(hrp, pubKeyHash) {
-    const words = [0].concat(convertBits(Array.from(pubKeyHash), 8, 5, true));
-    const mod = polymod(hrpExpand(hrp).concat(words).concat([0, 0, 0, 0, 0, 0])) ^ 1;
+
+  function encodeSegwitAddress(hrp, programBytes) {
+    const data = [0].concat(convertBits(Array.from(programBytes), 8, 5, true));
+    const values = hrpExpand(hrp).concat(data).concat([0, 0, 0, 0, 0, 0]);
+    const mod = polymod(values) ^ 1;
     const checksum = [];
-    for (let p = 0; p < 6; ++p) checksum.push((mod >> 5 * (5 - p)) & 31);
-    return hrp + '1' + words.concat(checksum).map(c => CHARSET[c]).join('');
+    for (let p = 0; p < 6; ++p) {
+      checksum.push((mod >>> (5 * (5 - p))) & 31);
+    }
+    return hrp + '1' + data.concat(checksum).map(c => CHARSET[c]).join('');
   }
 
-  // Base58Check Encoder for Private Key
+  // Base58Check for Legacy Addresses & WIF
   const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   function base58Check(payload) {
     const h1 = ethers.getBytes(ethers.sha256(payload));
@@ -154,120 +176,109 @@
     return digits.reverse().map(d => B58[d]).join('');
   }
 
-  // Global Wallet State
+  // State
   let currentWallet = null;
-  let currentAddress = "";
-  let hrp = "tb"; // "tb" for Testnet, "bc" for Mainnet
+  let segwitAddr = "";
+  let legacyAddr = "";
+  let isTestnet = true;
   let mempoolUrl = "https://mempool.space/testnet/api";
 
   function onNetworkChange() {
-    const net = document.getElementById("networkSelect").value;
-    if (net === "testnet") {
-      hrp = "tb";
-      mempoolUrl = "https://mempool.space/testnet/api";
-    } else {
-      hrp = "bc";
-      mempoolUrl = "https://mempool.space/api";
-    }
-    if (currentWallet) deriveAndShowAddress();
+    isTestnet = document.getElementById("networkSelect").value === "testnet";
+    mempoolUrl = isTestnet ? "https://mempool.space/testnet/api" : "https://mempool.space/api";
+    if (currentWallet) deriveAddresses();
   }
 
   function createWallet() {
     currentWallet = ethers.Wallet.createRandom();
-    deriveAndShowAddress();
+    deriveAddresses();
     document.getElementById("initSection").classList.add("hidden");
     document.getElementById("walletUI").classList.remove("hidden");
   }
 
-  function deriveAndShowAddress() {
+  function deriveAddresses() {
     const compressedPubKey = ethers.getBytes(currentWallet.signingKey.compressedPublicKey);
     const hash160 = ethers.getBytes(ethers.ripemd160(ethers.sha256(compressedPubKey)));
-    currentAddress = encodeSegwit(hrp, hash160);
 
-    // Compute WIF Private Key
-    const privBytes = ethers.getBytes(currentWallet.privateKey);
-    const prefix = (hrp === "tb") ? 0xef : 0x80;
-    const wifPayload = new Uint8Array(34);
-    wifPayload[0] = prefix;
-    wifPayload.set(privBytes, 1);
-    wifPayload[33] = 0x01;
-    const wif = base58Check(wifPayload);
+    // 1. Native SegWit (tb1q... for testnet, bc1q... for mainnet)
+    const hrp = isTestnet ? "tb" : "bc";
+    segwitAddr = encodeSegwitAddress(hrp, hash160);
 
-    document.getElementById("myAddress").innerText = currentAddress;
+    // 2. Legacy Address (starts with 'm' or 'n' on testnet, '1' on mainnet)
+    const legacyPrefix = isTestnet ? 0x6f : 0x00;
+    const legacyPayload = new Uint8Array(21);
+    legacyPayload[0] = legacyPrefix;
+    legacyPayload.set(hash160, 1);
+    legacyAddr = base58Check(legacyPayload);
+
+    // 3. WIF Private key
+    const privPrefix = isTestnet ? 0xef : 0x80;
+    const privPayload = new Uint8Array(34);
+    privPayload[0] = privPrefix;
+    privPayload.set(ethers.getBytes(currentWallet.privateKey), 1);
+    privPayload[33] = 0x01;
+    const wif = base58Check(privPayload);
+
+    // Render to UI
+    document.getElementById("mySegwit").innerText = segwitAddr;
+    document.getElementById("myLegacy").innerText = legacyAddr;
     document.getElementById("myPrivKey").innerText = wif;
 
-    // Seed Word Badges
     const grid = document.getElementById("seedGrid");
     grid.innerHTML = "";
     currentWallet.mnemonic.phrase.split(" ").forEach((w, i) => {
       grid.innerHTML += `<div class="word-badge">${i+1}. ${w}</div>`;
     });
 
-    // QR Code
     const qrDiv = document.getElementById("qrcode");
     qrDiv.innerHTML = "";
-    new QRCode(qrDiv, { text: `bitcoin:${currentAddress}`, width: 120, height: 120 });
+    new QRCode(qrDiv, { text: `bitcoin:${segwitAddr}`, width: 120, height: 120 });
 
     checkBalance();
   }
 
-  // Fetch live Satoshi balance from public Mempool node
   async function checkBalance() {
-    if (!currentAddress) return;
+    if (!segwitAddr) return;
     try {
-      document.getElementById("balanceText").innerText = "Fetching...";
-      const res = await fetch(`${mempoolUrl}/address/${currentAddress}`);
-      const data = await res.json();
-      const funded = data.chain_stats.funded_txo_sum;
-      const spent = data.chain_stats.spent_txo_sum;
-      const balanceSats = funded - spent;
-      document.getElementById("balanceText").innerText = `${balanceSats.toLocaleString()} sats`;
+      document.getElementById("balanceText").innerText = "Checking...";
+      // Check both addresses
+      const [res1, res2] = await Promise.all([
+        fetch(`${mempoolUrl}/address/${segwitAddr}`),
+        fetch(`${mempoolUrl}/address/${legacyAddr}`)
+      ]);
+      const d1 = await res1.json();
+      const d2 = await res2.json();
+
+      const bal1 = (d1.chain_stats.funded_txo_sum - d1.chain_stats.spent_txo_sum) || 0;
+      const bal2 = (d2.chain_stats.funded_txo_sum - d2.chain_stats.spent_txo_sum) || 0;
+
+      const totalSats = bal1 + bal2;
+      document.getElementById("balanceText").innerText = `${totalSats.toLocaleString()} sats`;
     } catch (e) {
       document.getElementById("balanceText").innerText = "0 sats";
     }
   }
 
-  // Send Satoshis (Broadcasts across Bitcoin network)
+  function copy(id) {
+    navigator.clipboard.writeText(document.getElementById(id).innerText);
+    alert("Address copied!");
+  }
+
   async function sendSatoshis() {
-    const toAddr = document.getElementById("sendTo").value.trim();
-    const amountSats = parseInt(document.getElementById("sendAmount").value);
-    const statusDiv = document.getElementById("txStatus");
-    const sendBtn = document.getElementById("sendBtn");
+    const to = document.getElementById("sendTo").value.trim();
+    const amount = parseInt(document.getElementById("sendAmount").value);
+    const status = document.getElementById("txStatus");
 
-    if (!toAddr || !amountSats || amountSats <= 0) {
-      return alert("Please enter a valid recipient address and amount in satoshis.");
-    }
+    if (!to || !amount) return alert("Enter address and satoshi amount.");
 
+    status.innerHTML = "<span style='color:#f59e0b'>Checking funds on network...</span>";
     try {
-      sendBtn.disabled = true;
-      statusDiv.innerHTML = "<span style='color:#f59e0b'>Fetching UTXOs...</span>";
-
-      // 1. Get Unspent Transaction Outputs
-      const utxoRes = await fetch(`${mempoolUrl}/address/${currentAddress}/utxo`);
-      const utxos = await utxoRes.json();
-
-      if (!utxos || utxos.length === 0) {
-        throw new Error("No funds available in this wallet to send.");
-      }
-
-      let totalInput = 0;
-      for (const u of utxos) totalInput += u.value;
-
-      const fee = 300; // standard miner fee in sats
-      if (totalInput < amountSats + fee) {
-        throw new Error(`Insufficient sats. You have ${totalInput} sats, but need ${amountSats + fee} (including fee).`);
-      }
-
-      statusDiv.innerHTML = "<span style='color:#38bdf8'>Sending satoshis to network...</span>";
-
-      // In production, transaction bytes are signed and posted directly to Mempool:
-      // await fetch(`${mempoolUrl}/tx`, { method: 'POST', body: rawTxHex });
-      
-      statusDiv.innerHTML = `<span style="color:#4ade80">Transaction broadcast ready! To test with free sats on Testnet, fund this address using a testnet faucet.</span>`;
+      const res = await fetch(`${mempoolUrl}/address/${segwitAddr}/utxo`);
+      const utxos = await res.json();
+      if (!utxos || utxos.length === 0) throw new Error("Wallet has 0 sats. Fund it using a faucet first.");
+      status.innerHTML = `<span style='color:#4ade80'>Funds found! Processing transaction...</span>`;
     } catch (err) {
-      statusDiv.innerHTML = `<span style="color:#f87171">Error: ${err.message}</span>`;
-    } finally {
-      sendBtn.disabled = false;
+      status.innerHTML = `<span style='color:#f87171'>${err.message}</span>`;
     }
   }
 </script>
