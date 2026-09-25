@@ -82,6 +82,7 @@
       margin-top: 10px;
       display: none;
       word-break: break-all;
+      line-height: 1.5;
     }
     .status-error { background: #450a0a; border: 1px solid #dc2626; color: #fca5a5; }
     .status-success { background: #022c22; border: 1px solid #047857; color: #6ee7b7; }
@@ -100,7 +101,7 @@
       display: block;
       margin-top: 4px;
       background: #111827;
-      padding: 6px;
+      padding: 8px;
       border-radius: 4px;
       border: 1px solid #1e293b;
     }
@@ -132,14 +133,14 @@
     <span class="badge">Speed.app</span>
   </div>
 
-  <!-- STEP 1: VERIFY API KEY PANEL -->
+  <!-- STEP 1: VERIFY API KEY -->
   <div id="verifyPanel">
     <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-      Enter your Speed Secret Key (visible):
+      Enter your Speed Secret Key (Visible):
     </p>
 
     <label style="font-size: 12px; color: var(--muted);">Speed Secret Key:</label>
-    <!-- type="text" keeps the key visible and unhidden -->
+    <!-- type="text" keeps key unhidden and visible -->
     <input type="text" id="apiKeyInput" placeholder="sk_live_... or sk_test_..." />
 
     <button id="verifyBtn" class="btn-main" onclick="verifyApiKey()">
@@ -149,9 +150,8 @@
     <div id="verifyStatus" class="status-box"></div>
   </div>
 
-  <!-- STEP 2: CREATE PAYMENT PANEL (UNLOCKED) -->
+  <!-- STEP 2: CREATE PAYMENT (UNLOCKED) -->
   <div id="paymentPanel" class="hidden">
-    <!-- Shows the Full Unmasked Key -->
     <div class="account-bar">
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <span style="color: #4ade80; font-weight: bold;">● Verified API Key:</span>
@@ -164,17 +164,11 @@
 
     <h3 style="font-size: 15px; margin-bottom: 10px;">Create New Payment</h3>
 
-    <label style="font-size: 12px; color: var(--muted);">Amount:</label>
+    <label style="font-size: 12px; color: var(--muted);">Amount in Satoshis (sats):</label>
     <input type="number" id="payAmount" placeholder="e.g. 100" value="100" />
 
-    <label style="font-size: 12px; color: var(--muted);">Currency:</label>
-    <select id="payCurrency">
-      <option value="SATS" selected>SATS (Satoshis - Lightning)</option>
-      <option value="USD">USD ($ Dollars)</option>
-    </select>
-
-    <label style="font-size: 12px; color: var(--muted);">Description / Note (Optional):</label>
-    <input type="text" id="payMemo" placeholder="Payment for Order #101" />
+    <label style="font-size: 12px; color: var(--muted);">Description / Memo (Optional):</label>
+    <input type="text" id="payMemo" placeholder="Order Payment" value="Order Payment" />
 
     <button id="createPayBtn" class="btn-main" onclick="createPayment()">
       ⚡ Create Payment
@@ -182,7 +176,6 @@
 
     <div id="paymentStatus" class="status-box"></div>
 
-    <!-- QR Code & Link Result -->
     <div id="qrResult" class="qr-wrapper hidden">
       <div id="qrcode"></div>
       <p style="font-size: 12px; margin-top: 12px; color: var(--primary); font-weight: bold;">
@@ -202,33 +195,44 @@
     unlockPaymentUI(activeKey);
   }
 
-  // Speed API Caller (Uses Vercel Rewrite directly to bypass CORS)
-  async function callSpeedApi(endpoint, method = "GET", body = null) {
+  // Reliable Dual-Path Caller (Checks Vercel rewrite first, then direct fallback)
+  async function callSpeedApi(endpoint, method = "POST", body = null) {
     const key = activeKey || document.getElementById("apiKeyInput").value.trim();
-    
-    // Uses the Vercel internal proxy route created in vercel.json
-    const url = `/api/speed/${endpoint}`;
     const authHeader = "Basic " + btoa(key + ":");
-
-    const options = {
-      method,
-      headers: {
-        "Authorization": authHeader,
-        "Content-Type": "application/json"
-      }
+    const headers = {
+      "Authorization": authHeader,
+      "Content-Type": "application/json",
+      "Accept": "application/json"
     };
-    if (body) options.body = JSON.stringify(body);
 
-    const res = await fetch(url, options);
-    const data = await res.json().catch(() => ({}));
+    const payload = body ? JSON.stringify(body) : null;
+
+    // 1. Try Vercel Rewrite route (/api/speed/...)
+    let res = await fetch(`/api/speed/${endpoint}`, { method, headers, body: payload }).catch(() => null);
+
+    // 2. Fallback to direct speed API if rewrite fails or gives 403
+    if (!res || res.status === 403 || !res.ok) {
+      const directRes = await fetch(`https://api.tryspeed.com/v1/${endpoint}`, { method, headers, body: payload }).catch(() => null);
+      if (directRes && (directRes.ok || directRes.status === 400 || directRes.status === 401)) {
+        res = directRes;
+      }
+    }
+
+    if (!res) throw new Error("Could not connect to Speed servers.");
+
+    const text = await res.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch (e) {}
 
     if (!res.ok) {
-      throw new Error(data.message || `API Error: ${res.status}`);
+      const errMsg = data.message || data.error?.message || text.substring(0, 150) || `HTTP ${res.status}`;
+      throw new Error(`[HTTP ${res.status}] ${errMsg}`);
     }
+
     return data;
   }
 
-  // 1. VERIFY API KEY
+  // 1. VERIFY API KEY (Uses valid POST /checkout-sessions)
   async function verifyApiKey() {
     const key = document.getElementById("apiKeyInput").value.trim();
     const btn = document.getElementById("verifyBtn");
@@ -236,19 +240,29 @@
 
     if (!key) return alert("Please enter your Speed Secret Key.");
     if (!key.startsWith("sk_test_") && !key.startsWith("sk_live_")) {
-      return alert("Invalid key format. A Speed Secret Key starts with 'sk_test_' or 'sk_live_'.");
+      return alert("Invalid key format. Speed Secret Keys start with 'sk_test_' or 'sk_live_'.");
     }
 
     btn.disabled = true;
     btn.innerText = "Verifying with Speed.app...";
     status.style.display = "block";
     status.className = "status-box";
-    status.innerText = "Connecting directly to Speed API...";
+    status.innerText = "Authenticating with Speed API...";
 
     try {
       activeKey = key;
-      await callSpeedApi("checkout-sessions?limit=1", "GET");
 
+      // Authenticate by creating a valid test verification session
+      const testPayload = {
+        amount: 10,
+        currency: "SATS",
+        payment_methods: ["lightning"],
+        statement_descriptor: "Verify Key"
+      };
+
+      await callSpeedApi("checkout-sessions", "POST", testPayload);
+
+      // Key authenticated successfully
       localStorage.setItem("speed_verified_key", key);
       status.className = "status-box status-success";
       status.innerText = "✓ Key verified successfully!";
@@ -270,7 +284,6 @@
   function unlockPaymentUI(key) {
     document.getElementById("verifyPanel").classList.add("hidden");
     document.getElementById("paymentPanel").classList.remove("hidden");
-    // Displays the full, visible, unmasked key
     document.getElementById("keyDisplay").innerText = key;
   }
 
@@ -283,8 +296,7 @@
   // 3. CREATE PAYMENT
   async function createPayment() {
     const amount = parseFloat(document.getElementById("payAmount").value);
-    const currency = document.getElementById("payCurrency").value;
-    const memo = document.getElementById("payMemo").value || "Payment via Speed Gateway";
+    const memo = document.getElementById("payMemo").value || "Payment";
     const btn = document.getElementById("createPayBtn");
     const status = document.getElementById("paymentStatus");
     const qrResult = document.getElementById("qrResult");
@@ -299,7 +311,7 @@
     try {
       const payload = {
         amount: amount,
-        currency: currency,
+        currency: "SATS",
         payment_methods: ["lightning"],
         statement_descriptor: memo.substring(0, 22)
       };
@@ -310,7 +322,7 @@
         throw new Error("Speed did not return a checkout URL.");
       }
 
-      // Generate QR Code & Checkout Link
+      // Render QR Code
       const qrDiv = document.getElementById("qrcode");
       qrDiv.innerHTML = "";
       new QRCode(qrDiv, { text: session.url, width: 170, height: 170 });
@@ -324,7 +336,7 @@
     } catch (err) {
       status.style.display = "block";
       status.className = "status-box status-error";
-      status.innerText = "Payment creation failed: " + err.message;
+      status.innerText = "Payment failed: " + err.message;
     } finally {
       btn.disabled = false;
       btn.innerText = "⚡ Create Payment";
