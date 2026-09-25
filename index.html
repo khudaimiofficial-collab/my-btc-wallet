@@ -3,31 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lightning Network Satoshi Wallet</title>
+  <title>Speed Wallet - Lightning Gateway</title>
   
-  <!-- QR Code CDN -->
+  <!-- QR Code Generator CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
   <style>
-    :root { --bg: #090d16; --card: #111827; --border: #1f2937; --primary: #f59e0b; --text: #f3f4f6; --muted: #9ca3af; }
+    :root { --bg: #0b0f19; --card: #131c31; --border: #1e293b; --primary: #00d084; --text: #f8fafc; --muted: #94a3b8; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 25px 15px; }
-    .wallet-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; width: 100%; max-width: 440px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .wallet-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; width: 100%; max-width: 450px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
     .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .badge { background: rgba(245,158,11,0.2); color: var(--primary); border: 1px solid var(--primary); font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 20px; text-transform: uppercase; }
+    .badge { background: rgba(0, 208, 132, 0.15); color: var(--primary); border: 1px solid var(--primary); font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 20px; }
     button { background: var(--primary); color: black; font-weight: bold; border: none; padding: 12px; width: 100%; border-radius: 8px; font-size: 14px; cursor: pointer; margin-top: 6px; }
-    button:hover { background: #d97706; }
+    button:hover { background: #00b06f; }
     button:disabled { background: #475569; cursor: not-allowed; }
-    input { width: 100%; background: #090d16; border: 1px solid #334155; color: white; padding: 10px; border-radius: 8px; font-size: 13px; margin: 5px 0 10px; font-family: monospace; }
-    .box { background: #090d16; border: 1px solid var(--border); padding: 10px; border-radius: 6px; font-family: monospace; font-size: 11px; word-break: break-all; color: #38bdf8; margin-top: 5px; }
-    .balance-box { background: #090d16; border: 1px solid var(--border); border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 20px; }
-    .balance-val { font-size: 36px; font-weight: bold; color: var(--primary); margin: 6px 0; }
+    input { width: 100%; background: #0b0f19; border: 1px solid #334155; color: white; padding: 10px; border-radius: 8px; font-size: 13px; margin: 5px 0 12px; font-family: monospace; }
+    .box { background: #0b0f19; border: 1px solid var(--border); padding: 10px; border-radius: 6px; font-family: monospace; font-size: 11px; word-break: break-all; color: #38bdf8; margin-top: 8px; }
     .qr-wrapper { text-align: center; margin-top: 15px; }
     #qrcode { background: white; padding: 12px; border-radius: 8px; display: inline-block; }
     .hidden { display: none; }
-    hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
-    .tab-btn { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 8px; width: 48%; border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+    .tab-btn { background: #0b0f19; border: 1px solid var(--border); color: var(--muted); padding: 8px; width: 50%; border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; }
     .tab-btn.active { background: var(--border); color: white; border-color: var(--primary); }
+    hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
   </style>
 </head>
 <body>
@@ -35,213 +34,151 @@
 <div class="wallet-card">
   <div class="header">
     <div>
-      <h2>⚡ Lightning Wallet</h2>
-      <p style="font-size: 12px; color: var(--muted);">Instant Bitcoin Payments • Zero Delay</p>
+      <h2>⚡ Speed Wallet</h2>
+      <p style="font-size: 12px; color: var(--muted);">Direct Speed.app Lightning Integration</p>
     </div>
-    <span class="badge">Lightning</span>
+    <span class="badge">Speed.app</span>
   </div>
 
-  <!-- Setup Section (1-Time Connection) -->
-  <div id="setupUI">
-    <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-      Lightning requires a live node backend. You can connect to any free, instant instance in 5 seconds:
-    </p>
+  <!-- Tabs Navigation -->
+  <div class="tabs">
+    <button id="tabReceive" class="tab-btn active" onclick="switchTab('receive')">Receive Sats</button>
+    <button id="tabSend" class="tab-btn" onclick="switchTab('send')">Send to Speed</button>
+  </div>
 
-    <label style="font-size: 11px; color: var(--muted);">Server URL:</label>
-    <input type="text" id="nodeUrl" value="https://legend.lnbits.com" />
+  <!-- TAB 1: RECEIVE DIRECTLY INTO SPEED WALLET -->
+  <div id="receivePanel">
+    <label style="font-size: 12px; color: var(--muted);">Your Speed Wallet Address:</label>
+    <input type="text" id="mySpeedAddress" placeholder="username@speed.app" />
 
-    <label style="font-size: 11px; color: var(--muted);">Admin / Wallet Key:</label>
-    <input type="password" id="apiKey" placeholder="Paste your Admin Key" />
+    <label style="font-size: 12px; color: var(--muted);">Amount to Receive (Satoshis):</label>
+    <input type="number" id="receiveSats" placeholder="e.g. 100 sats" />
 
-    <button onclick="saveAndConnect()">⚡ Connect Lightning</button>
-
-    <div style="background: #090d16; border: 1px solid #1e293b; padding: 12px; border-radius: 8px; margin-top: 15px; font-size: 12px; color: var(--muted);">
-      <strong>How to get free keys (30 seconds):</strong>
-      <ol style="margin-left: 18px; margin-top: 6px; line-height: 1.6;">
-        <li>Open <a href="https://demo.lnbits.com" target="_blank" style="color:var(--primary)">demo.lnbits.com</a></li>
-        <li>Type a wallet name and click <b>Add Wallet</b> (no email required)</li>
-        <li>Click <b>API Info</b> on the left and copy the <b>Admin Key</b></li>
-        <li>Paste it above!</li>
-      </ol>
+    <button onclick="generateSpeedInvoice()">⚡ Create Speed Invoice</button>
+    
+    <div id="invoiceResult" class="hidden qr-wrapper">
+      <div id="qrcode"></div>
+      <div id="invoiceText" class="box"></div>
+      <p style="font-size:11px; color:var(--primary); margin-top:8px;">Scan with any Lightning app to deposit straight into your Speed Wallet!</p>
     </div>
   </div>
 
-  <!-- Main Wallet Dashboard -->
-  <div id="dashboardUI" class="hidden">
-    <div class="balance-box">
-      <span style="font-size: 12px; color: var(--muted); text-transform: uppercase;">Instant Balance</span>
-      <div id="balanceVal" class="balance-val">0 sats</div>
-      <button onclick="fetchBalance()" style="background:#1e293b; color:white; width:auto; font-size:11px; padding:6px 14px; margin-right:5px;">Refresh</button>
-      <button onclick="disconnect()" style="background:transparent; border:1px solid #334155; color:var(--muted); width:auto; font-size:11px; padding:6px 14px;">Disconnect</button>
-    </div>
+  <!-- TAB 2: SEND SATS TO ANY SPEED WALLET USER -->
+  <div id="sendPanel" class="hidden">
+    <label style="font-size: 12px; color: var(--muted);">Recipient's Speed Address:</label>
+    <input type="text" id="targetSpeedAddress" placeholder="friend@speed.app" />
 
-    <!-- Mode Selector: Receive vs Send -->
-    <div style="display:flex; justify-content:space-between; margin-bottom: 15px;">
-      <button id="tabReceive" class="tab-btn active" onclick="switchMode('receive')">Receive (Invoice)</button>
-      <button id="tabSend" class="tab-btn" onclick="switchMode('send')">Send (Pay)</button>
-    </div>
+    <label style="font-size: 12px; color: var(--muted);">Amount to Send (Satoshis):</label>
+    <input type="number" id="sendSats" placeholder="e.g. 50 sats" />
 
-    <!-- RECEIVE SECTION -->
-    <div id="receivePanel">
-      <label style="font-size: 12px; color: var(--muted);">Amount to Receive (Satoshis):</label>
-      <input type="number" id="rxAmount" placeholder="e.g. 50 sats" />
-      <input type="text" id="rxMemo" placeholder="Memo / Note (optional)" />
-      <button onclick="createInvoice()">Generate Lightning QR</button>
+    <button id="fetchPayBtn" onclick="preparePayment()">⚡ Fetch Payment Request</button>
 
-      <div id="invoiceResult" class="hidden qr-wrapper">
-        <div id="qrcode"></div>
-        <div id="invoiceText" class="box" style="margin-top: 10px;"></div>
-        <p style="font-size:11px; color:#4ade80; margin-top:8px;">Scan with Cash App, Strike, Blink, or Phoenix</p>
-      </div>
-    </div>
-
-    <!-- SEND SECTION -->
-    <div id="sendPanel" class="hidden">
-      <label style="font-size: 12px; color: var(--muted);">Paste Lightning Invoice (lnbc...):</label>
-      <input type="text" id="payReq" placeholder="lnbc..." />
-      <button id="payBtn" onclick="payInvoice()">⚡ Pay Instantly</button>
-      <div id="payStatus" style="font-size: 12px; margin-top: 10px; word-break: break-all;"></div>
+    <div id="payResult" class="hidden">
+      <p style="font-size: 12px; color: var(--muted); margin-top: 15px;">Generated Invoice for Speed Wallet:</p>
+      <div id="payInvoiceBox" class="box"></div>
+      <button style="background:#2563eb; color:white; margin-top:8px;" onclick="copyInvoice()">Copy Invoice to Clipboard</button>
     </div>
   </div>
+
+  <hr/>
+
+  <!-- Speed API Merchant Mode (Optional) -->
+  <details style="font-size: 12px; color: var(--muted); cursor: pointer;">
+    <summary>Speed.app Developer API Mode</summary>
+    <div style="margin-top: 12px;">
+      <label>Speed Secret Key (sk_live_... / sk_test_...):</label>
+      <input type="password" id="speedApiKey" placeholder="sk_test_..." />
+      <button onclick="saveSpeedKey()" style="background:#1e293b; color:white; padding:8px; font-size:12px;">Save API Key</button>
+      <div id="apiStatus" style="margin-top:8px; font-size:11px;"></div>
+    </div>
+  </details>
 </div>
 
 <script>
-  let server = localStorage.getItem("ln_server") || "";
-  let apiKey = localStorage.getItem("ln_key") || "";
+  // 1. Generate an Invoice for your Speed Wallet using standard LNURL-pay
+  async function generateSpeedInvoice() {
+    const address = document.getElementById("mySpeedAddress").value.trim().toLowerCase();
+    const sats = parseInt(document.getElementById("receiveSats").value);
+    const resultBox = document.getElementById("invoiceResult");
 
-  if (server && apiKey) {
-    showDashboard();
-  }
-
-  function saveAndConnect() {
-    server = document.getElementById("nodeUrl").value.trim().replace(/\/$/, "");
-    apiKey = document.getElementById("apiKey").value.trim();
-
-    if (!server || !apiKey) return alert("Please enter your server URL and Key.");
-
-    localStorage.setItem("ln_server", server);
-    localStorage.setItem("ln_key", apiKey);
-    showDashboard();
-  }
-
-  function disconnect() {
-    localStorage.clear();
-    location.reload();
-  }
-
-  function showDashboard() {
-    document.getElementById("setupUI").classList.add("hidden");
-    document.getElementById("dashboardUI").classList.remove("hidden");
-    fetchBalance();
-  }
-
-  // 1. Fetch Instant Balance in Satoshis
-  async function fetchBalance() {
-    try {
-      document.getElementById("balanceVal").innerText = "...";
-      const res = await fetch(`${server}/api/v1/wallet`, {
-        headers: { "X-Api-Key": apiKey }
-      });
-      const data = await res.json();
-      // LNbits returns balance in millisats; divide by 1000 to get satoshis
-      const sats = Math.floor(data.balance / 1000);
-      document.getElementById("balanceVal").innerText = `${sats.toLocaleString()} sats`;
-    } catch (e) {
-      alert("Connection failed! Please check your Server URL or API Key.");
+    if (!address || !address.includes("@") || !sats || sats <= 0) {
+      return alert("Please enter a valid Speed Lightning address (e.g. username@speed.app) and sat amount.");
     }
-  }
 
-  // 2. Generate Lightning Invoice (lnbc...)
-  async function createInvoice() {
-    const amount = document.getElementById("rxAmount").value;
-    const memo = document.getElementById("rxMemo").value || "Lightning Web Payment";
-
-    if (!amount || amount <= 0) return alert("Please enter an amount in sats.");
+    const [user, domain] = address.split("@");
+    resultBox.classList.remove("hidden");
+    document.getElementById("invoiceText").innerText = "Contacting Speed.app servers...";
 
     try {
-      const res = await fetch(`${server}/api/v1/payments`, {
-        method: "POST",
-        headers: {
-          "X-Api-Key": apiKey,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ out: false, amount: parseInt(amount), memo })
-      });
-      const data = await res.json();
+      // Step A: Fetch LNURL metadata from Speed.app
+      const lnurlRes = await fetch(`https://${domain}/.well-known/lnurlp/${user}`);
+      const lnurlData = await lnurlRes.json();
 
-      document.getElementById("invoiceResult").classList.remove("hidden");
-      document.getElementById("invoiceText").innerText = data.payment_request;
+      if (!lnurlData.callback) {
+        throw new Error(lnurlData.reason || "Could not find this Speed Wallet address.");
+      }
 
-      // Draw QR Code
+      // Step B: Request raw Lightning invoice (BOLT11) in millisatoshis (1 sat = 1000 msats)
+      const msats = sats * 1000;
+      const callbackRes = await fetch(`${lnurlData.callback}?amount=${msats}`);
+      const callbackData = await callbackRes.json();
+
+      if (!callbackData.pr) {
+        throw new Error(callbackData.reason || "Failed to create invoice.");
+      }
+
+      // Step C: Render Lightning invoice & QR code
+      const bolt11 = callbackData.pr;
+      document.getElementById("invoiceText").innerText = bolt11;
+
       const qrDiv = document.getElementById("qrcode");
       qrDiv.innerHTML = "";
-      new QRCode(qrDiv, { text: data.payment_request, width: 170, height: 170 });
-
-      // Poll automatically until paid
-      listenPayment(data.payment_hash);
+      new QRCode(qrDiv, { text: bolt11, width: 170, height: 170 });
     } catch (err) {
-      alert("Error creating invoice: " + err.message);
+      document.getElementById("invoiceText").innerText = "Error: " + err.message;
     }
   }
 
-  // 3. Listen for Incoming Payment (Auto-Refresh)
-  function listenPayment(hash) {
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`${server}/api/v1/payments/${hash}`, {
-          headers: { "X-Api-Key": apiKey }
-        });
-        const data = await res.json();
-        if (data.paid) {
-          clearInterval(interval);
-          alert("⚡ Payment Received Instantly!");
-          document.getElementById("invoiceResult").classList.add("hidden");
-          fetchBalance();
-        }
-      } catch (e) {}
-    }, 2000);
-  }
+  // 2. Prepare Payment to another Speed Wallet user
+  async function preparePayment() {
+    const address = document.getElementById("targetSpeedAddress").value.trim().toLowerCase();
+    const sats = parseInt(document.getElementById("sendSats").value);
+    const btn = document.getElementById("fetchPayBtn");
 
-  // 4. Pay Lightning Invoice Instantly
-  async function payInvoice() {
-    const bolt11 = document.getElementById("payReq").value.trim();
-    const status = document.getElementById("payStatus");
-    const btn = document.getElementById("payBtn");
-
-    if (!bolt11.toLowerCase().startsWith("lnbc")) {
-      return alert("Invalid invoice! A Lightning invoice starts with 'lnbc...'.");
+    if (!address || !address.includes("@") || !sats || sats <= 0) {
+      return alert("Please enter a valid recipient address (e.g. friend@speed.app) and sat amount.");
     }
+
+    const [user, domain] = address.split("@");
+    btn.disabled = true;
+    btn.innerText = "Fetching Invoice from Speed...";
 
     try {
-      btn.disabled = true;
-      status.innerHTML = "<span style='color:#f59e0b'>⚡ Dispatching across Lightning Network...</span>";
+      const lnurlRes = await fetch(`https://${domain}/.well-known/lnurlp/${user}`);
+      const lnurlData = await lnurlRes.json();
+      const callbackRes = await fetch(`${lnurlData.callback}?amount=${sats * 1000}`);
+      const callbackData = await callbackRes.json();
 
-      const res = await fetch(`${server}/api/v1/payments`, {
-        method: "POST",
-        headers: {
-          "X-Api-Key": apiKey,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ out: true, bolt11 })
-      });
-      const data = await res.json();
+      if (!callbackData.pr) throw new Error("Could not get invoice from Speed.");
 
-      if (data.payment_hash) {
-        status.innerHTML = `<span style='color:#4ade80'>✓ Payment Sent Instantly in 1 second!</span>`;
-        document.getElementById("payReq").value = "";
-        fetchBalance();
-      } else {
-        throw new Error(data.detail || "Payment failed");
-      }
+      document.getElementById("payInvoiceBox").innerText = callbackData.pr;
+      document.getElementById("payResult").classList.remove("hidden");
     } catch (err) {
-      status.innerHTML = `<span style='color:#f87171'>Error: ${err.message}</span>`;
+      alert("Error: " + err.message);
     } finally {
       btn.disabled = false;
+      btn.innerText = "⚡ Fetch Payment Request";
     }
   }
 
-  function switchMode(mode) {
-    if (mode === 'receive') {
+  function copyInvoice() {
+    const text = document.getElementById("payInvoiceBox").innerText;
+    navigator.clipboard.writeText(text);
+    alert("Invoice copied! Open your Speed Wallet or any Lightning app to pay.");
+  }
+
+  function switchTab(tab) {
+    if (tab === 'receive') {
       document.getElementById("tabReceive").classList.add("active");
       document.getElementById("tabSend").classList.remove("active");
       document.getElementById("receivePanel").classList.remove("hidden");
@@ -252,6 +189,13 @@
       document.getElementById("sendPanel").classList.remove("hidden");
       document.getElementById("receivePanel").classList.add("hidden");
     }
+  }
+
+  function saveSpeedKey() {
+    const key = document.getElementById("speedApiKey").value.trim();
+    if (!key) return alert("Enter your API key.");
+    localStorage.setItem("speed_api_key", key);
+    document.getElementById("apiStatus").innerHTML = "<span style='color:var(--primary)'>✓ Key saved for Speed.app API calls.</span>";
   }
 </script>
 
