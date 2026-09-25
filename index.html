@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Speed Wallet - Payment Gateway</title>
   
+  <!-- QR Code Library CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
   <style>
@@ -119,6 +120,17 @@
       border-radius: 8px;
       display: inline-block;
     }
+    .box {
+      background: #090d16;
+      border: 1px solid var(--border);
+      padding: 10px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 11px;
+      word-break: break-all;
+      color: #38bdf8;
+      margin-top: 8px;
+    }
     .hidden { display: none; }
   </style>
 </head>
@@ -128,7 +140,7 @@
   <div class="header">
     <div>
       <h2>⚡ Speed Payment</h2>
-      <p style="font-size: 12px; color: var(--muted);">Direct Speed.app Integration</p>
+      <p style="font-size: 12px; color: var(--muted);">Direct API: <code>/payments</code></p>
     </div>
     <span class="badge">Speed.app</span>
   </div>
@@ -140,7 +152,6 @@
     </p>
 
     <label style="font-size: 12px; color: var(--muted);">Speed Secret Key:</label>
-    <!-- type="text" keeps key unhidden and visible -->
     <input type="text" id="apiKeyInput" placeholder="sk_live_... or sk_test_..." />
 
     <button id="verifyBtn" class="btn-main" onclick="verifyApiKey()">
@@ -162,13 +173,19 @@
       <span id="keyDisplay" class="full-key"></span>
     </div>
 
-    <h3 style="font-size: 15px; margin-bottom: 10px;">Create New Payment</h3>
+    <h3 style="font-size: 15px; margin-bottom: 10px;">Create Speed Payment</h3>
 
-    <label style="font-size: 12px; color: var(--muted);">Amount in Satoshis (sats):</label>
+    <label style="font-size: 12px; color: var(--muted);">Amount:</label>
     <input type="number" id="payAmount" placeholder="e.g. 100" value="100" />
 
-    <label style="font-size: 12px; color: var(--muted);">Description / Memo (Optional):</label>
-    <input type="text" id="payMemo" placeholder="Order Payment" value="Order Payment" />
+    <label style="font-size: 12px; color: var(--muted);">Base Currency:</label>
+    <select id="payCurrency">
+      <option value="SATS" selected>SATS (Satoshis)</option>
+      <option value="USD">USD ($ Dollars)</option>
+    </select>
+
+    <label style="font-size: 12px; color: var(--muted);">Target Currency:</label>
+    <input type="text" value="SATS (Lightning)" disabled style="color: var(--primary);" />
 
     <button id="createPayBtn" class="btn-main" onclick="createPayment()">
       ⚡ Create Payment
@@ -176,14 +193,16 @@
 
     <div id="paymentStatus" class="status-box"></div>
 
+    <!-- Payment Result with QR Code -->
     <div id="qrResult" class="qr-wrapper hidden">
       <div id="qrcode"></div>
-      <p style="font-size: 12px; margin-top: 12px; color: var(--primary); font-weight: bold;">
-        Scan with Speed Wallet or any Lightning app!
+      <p style="font-size: 12px; margin-top: 10px; color: var(--primary); font-weight: bold;">
+        Lightning Invoice Generated!
       </p>
-      <a id="checkoutLink" href="#" target="_blank" style="display:inline-block; margin-top:10px; font-size:12px; color:#38bdf8; text-decoration:underline;">
-        Open Speed Hosted Checkout ↗
-      </a>
+      <div id="invoiceText" class="box"></div>
+      <button onclick="copyInvoice()" style="background:#1e293b; color:white; border:none; padding:8px; border-radius:6px; font-size:12px; cursor:pointer; margin-top:8px;">
+        Copy Lightning Invoice
+      </button>
     </div>
   </div>
 </div>
@@ -195,44 +214,54 @@
     unlockPaymentUI(activeKey);
   }
 
-  // Reliable Dual-Path Caller (Checks Vercel rewrite first, then direct fallback)
-  async function callSpeedApi(endpoint, method = "POST", body = null) {
+  // Official Speed /payments API Request Helper
+  async function callSpeedPaymentApi(body) {
     const key = activeKey || document.getElementById("apiKeyInput").value.trim();
     const authHeader = "Basic " + btoa(key + ":");
+    
+    // Official Speed Headers
     const headers = {
-      "Authorization": authHeader,
-      "Content-Type": "application/json",
-      "Accept": "application/json"
+      "accept": "application/json",
+      "authorization": authHeader,
+      "content-type": "application/json",
+      "speed-version": "2022-10-15"
     };
 
-    const payload = body ? JSON.stringify(body) : null;
+    const payload = JSON.stringify(body);
 
-    // 1. Try Vercel Rewrite route (/api/speed/...)
-    let res = await fetch(`/api/speed/${endpoint}`, { method, headers, body: payload }).catch(() => null);
+    // 1. Try Vercel Rewrite route (/api/speed/payments)
+    let res = await fetch("/api/speed/payments", {
+      method: "POST",
+      headers: headers,
+      body: payload
+    }).catch(() => null);
 
-    // 2. Fallback to direct speed API if rewrite fails or gives 403
-    if (!res || res.status === 403 || !res.ok) {
-      const directRes = await fetch(`https://api.tryspeed.com/v1/${endpoint}`, { method, headers, body: payload }).catch(() => null);
-      if (directRes && (directRes.ok || directRes.status === 400 || directRes.status === 401)) {
-        res = directRes;
-      }
+    // 2. Direct fallback if rewrite is bypassed
+    if (!res || !res.ok) {
+      const directRes = await fetch("https://api.tryspeed.com/payments", {
+        method: "POST",
+        headers: headers,
+        body: payload
+      }).catch(() => null);
+
+      if (directRes) res = directRes;
     }
 
-    if (!res) throw new Error("Could not connect to Speed servers.");
+    if (!res) throw new Error("Could not connect to Speed.app servers.");
 
     const text = await res.text();
     let data = {};
     try { data = JSON.parse(text); } catch (e) {}
 
     if (!res.ok) {
-      const errMsg = data.message || data.error?.message || text.substring(0, 150) || `HTTP ${res.status}`;
+      const errMsg = data.message || data.error?.message || text.substring(0, 160) || `HTTP ${res.status}`;
       throw new Error(`[HTTP ${res.status}] ${errMsg}`);
     }
 
     return data;
   }
 
-  // 1. VERIFY API KEY (Uses valid POST /checkout-sessions)
+  // 1. VERIFY API KEY
   async function verifyApiKey() {
     const key = document.getElementById("apiKeyInput").value.trim();
     const btn = document.getElementById("verifyBtn");
@@ -247,22 +276,21 @@
     btn.innerText = "Verifying with Speed.app...";
     status.style.display = "block";
     status.className = "status-box";
-    status.innerText = "Authenticating with Speed API...";
+    status.innerText = "Authenticating with Speed API (/payments)...";
 
     try {
-      activeKey = key;
-
-      // Authenticate by creating a valid test verification session
+      // Test payload according to the official spec
       const testPayload = {
         amount: 10,
         currency: "SATS",
-        payment_methods: ["lightning"],
-        statement_descriptor: "Verify Key"
+        target_currency: "SATS",
+        payment_methods: ["lightning"]
       };
 
-      await callSpeedApi("checkout-sessions", "POST", testPayload);
+      await callSpeedPaymentApi(testPayload);
 
       // Key authenticated successfully
+      activeKey = key;
       localStorage.setItem("speed_verified_key", key);
       status.className = "status-box status-success";
       status.innerText = "✓ Key verified successfully!";
@@ -280,7 +308,7 @@
     }
   }
 
-  // 2. UNLOCK PAYMENT PANEL (Full Key Shown)
+  // 2. UNLOCK PAYMENT PANEL
   function unlockPaymentUI(key) {
     document.getElementById("verifyPanel").classList.add("hidden");
     document.getElementById("paymentPanel").classList.remove("hidden");
@@ -293,10 +321,10 @@
     location.reload();
   }
 
-  // 3. CREATE PAYMENT
+  // 3. CREATE SPEED PAYMENT
   async function createPayment() {
     const amount = parseFloat(document.getElementById("payAmount").value);
-    const memo = document.getElementById("payMemo").value || "Payment";
+    const currency = document.getElementById("payCurrency").value;
     const btn = document.getElementById("createPayBtn");
     const status = document.getElementById("paymentStatus");
     const qrResult = document.getElementById("qrResult");
@@ -309,38 +337,52 @@
     qrResult.classList.add("hidden");
 
     try {
+      // Official API Body Params
       const payload = {
         amount: amount,
-        currency: "SATS",
-        payment_methods: ["lightning"],
-        statement_descriptor: memo.substring(0, 22)
+        currency: currency,
+        target_currency: "SATS",
+        payment_methods: ["lightning"]
       };
 
-      const session = await callSpeedApi("checkout-sessions", "POST", payload);
+      const payment = await callSpeedPaymentApi(payload);
 
-      if (!session.url) {
-        throw new Error("Speed did not return a checkout URL.");
+      // Extract Lightning invoice string (bolt11) or checkout URL
+      const invoice = 
+        payment.payment_method_details?.lightning?.payment_request ||
+        payment.payment_request ||
+        payment.hosted_url ||
+        payment.url;
+
+      if (!invoice) {
+        throw new Error("Payment created, but no Lightning invoice was returned.");
       }
 
-      // Render QR Code
+      // Draw QR Code
       const qrDiv = document.getElementById("qrcode");
       qrDiv.innerHTML = "";
-      new QRCode(qrDiv, { text: session.url, width: 170, height: 170 });
+      new QRCode(qrDiv, { text: invoice, width: 170, height: 170 });
 
-      document.getElementById("checkoutLink").href = session.url;
+      document.getElementById("invoiceText").innerText = invoice;
       qrResult.classList.remove("hidden");
 
       status.style.display = "block";
       status.className = "status-box status-success";
-      status.innerText = `✓ Payment session created! ID: ${session.id}`;
+      status.innerText = `✓ Payment created successfully! ID: ${payment.id}`;
     } catch (err) {
       status.style.display = "block";
       status.className = "status-box status-error";
-      status.innerText = "Payment failed: " + err.message;
+      status.innerText = "Payment creation failed: " + err.message;
     } finally {
       btn.disabled = false;
       btn.innerText = "⚡ Create Payment";
     }
+  }
+
+  function copyInvoice() {
+    const text = document.getElementById("invoiceText").innerText;
+    navigator.clipboard.writeText(text);
+    alert("Lightning invoice copied!");
   }
 </script>
 
