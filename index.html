@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bitcoin Web3 Sovereign Wallet</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    :root { --bg: #090d16; --card-bg: #111827; --border: #1f2937; --primary: #f59e0b; --text: #f3f4f6; --text-muted: #9ca3af; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background-color: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 30px 15px; }
+    .wallet-container { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; width: 100%; max-width: 500px; padding: 25px; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .badge { background: rgba(245,158,11,0.2); color: var(--primary); border: 1px solid var(--primary); font-size: 11px; font-weight: bold; padding: 3px 8px; border-radius: 20px; }
+    .btn-main { background: var(--primary); color: black; font-weight: bold; border: none; padding: 12px; width: 100%; border-radius: 8px; font-size: 15px; cursor: pointer; }
+    .btn-main:hover { background: #d97706; }
+    .seed-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; background: #090d16; border: 1px solid #064e3b; padding: 12px; border-radius: 8px; margin-top: 6px; }
+    .word-badge { background: #022c22; border: 1px solid #047857; color: #6ee7b7; font-size: 12px; padding: 5px; border-radius: 4px; font-family: monospace; }
+    .field-group { margin-top: 15px; }
+    .field-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+    .copy-btn { background: none; border: none; color: var(--primary); font-size: 11px; cursor: pointer; font-weight: bold; }
+    .data-box { background: #090d16; border: 1px solid var(--border); padding: 10px; border-radius: 6px; font-family: monospace; font-size: 12px; word-break: break-all; color: #38bdf8; }
+    .priv-box { background: #1c0b0b; border-color: #7f1d1d; color: #fca5a5; }
+    .qr-wrapper { text-align: center; margin-top: 20px; }
+    #qrcode { background: white; padding: 10px; border-radius: 8px; display: inline-block; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+<div class="wallet-container">
+  <div class="header">
+    <div>
+      <h2>₿ Bitcoin Wallet</h2>
+      <p style="font-size: 12px; color: var(--text-muted);">Direct Client-Side Generator</p>
+    </div>
+    <span class="badge">100% Offline</span>
+  </div>
+
+  <button id="generateBtn" class="btn-main">⚡ Direct Create Wallet</button>
+
+  <div id="resultDashboard" class="hidden">
+    <div class="field-group">
+      <div class="field-label">
+        <span>12-WORD SEED PHRASE</span>
+        <button class="copy-btn" onclick="copyText('rawSeed')">Copy</button>
+      </div>
+      <div id="seedGrid" class="seed-grid"></div>
+      <div id="rawSeed" style="display: none;"></div>
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">
+        <span>BITCOIN ADDRESS (bc1q...)</span>
+        <button class="copy-btn" onclick="copyText('btcAddress')">Copy</button>
+      </div>
+      <div id="btcAddress" class="data-box"></div>
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">
+        <span>PRIVATE KEY (HEX)</span>
+        <button class="copy-btn" onclick="copyText('privKey')">Copy</button>
+      </div>
+      <div id="privKey" class="data-box priv-box"></div>
+    </div>
+
+    <div class="qr-wrapper">
+      <div id="qrcode"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import * as bip39 from 'https://esm.sh/@scure/bip39@1.4.0';
+  import { wordlist } from 'https://esm.sh/@scure/bip39@1.4.0/wordlists/english';
+  import { HDKey } from 'https://esm.sh/@scure/bip32@1.4.0';
+  import * as btc from 'https://esm.sh/@scure/btc-signer@1.3.1';
+
+  document.getElementById("generateBtn").addEventListener("click", () => {
+    const mnemonic = bip39.generateMnemonic(wordlist, 128);
+    const seed = bip39.mnemonicToSeedSync(mnemonic);
+    const root = HDKey.fromMasterSeed(seed);
+    const account = root.derive("m/84'/0'/0'/0/0");
+    const p2wpkh = btc.p2wpkh(account.publicKey, btc.NETWORK);
+
+    const grid = document.getElementById("seedGrid");
+    grid.innerHTML = "";
+    mnemonic.split(" ").forEach((word, i) => {
+      const badge = document.createElement("div");
+      badge.className = "word-badge";
+      badge.innerText = `${i + 1}. ${word}`;
+      grid.appendChild(badge);
+    });
+
+    document.getElementById("rawSeed").innerText = mnemonic;
+    document.getElementById("btcAddress").innerText = p2wpkh.address;
+    document.getElementById("privKey").innerText = btc.bytesToHex(account.privateKey);
+
+    const qrDiv = document.getElementById("qrcode");
+    qrDiv.innerHTML = "";
+    new QRCode(qrDiv, { text: `bitcoin:${p2wpkh.address}`, width: 130, height: 130 });
+
+    document.getElementById("resultDashboard").classList.remove("hidden");
+  });
+</script>
+
+<script>
+  function copyText(id) {
+    navigator.clipboard.writeText(document.getElementById(id).innerText);
+    alert("Copied to clipboard!");
+  }
+</script>
+</body>
+  </html>
