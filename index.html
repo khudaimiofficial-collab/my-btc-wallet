@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Speed Wallet - Payment Gateway</title>
   
-  <!-- QR Code Library CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
   <style>
@@ -133,20 +132,16 @@
       max-height: 120px;
       overflow-y: auto;
     }
-    .hidden { display: none; }
-    pre {
-      background: #090d16;
-      border: 1px solid var(--border);
-      padding: 10px;
-      border-radius: 6px;
-      font-family: monospace;
-      font-size: 10px;
-      color: #94a3b8;
-      overflow-x: auto;
-      max-height: 180px;
-      margin-top: 8px;
-      text-align: left;
+    .live-status {
+      font-size: 14px;
+      font-weight: bold;
+      padding: 8px 12px;
+      border-radius: 8px;
+      margin-top: 12px;
+      display: inline-block;
     }
+    .hidden { display: none; }
+    hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
   </style>
 </head>
 <body>
@@ -176,7 +171,7 @@
     <div id="verifyStatus" class="status-box"></div>
   </div>
 
-  <!-- STEP 2: CREATE PAYMENT (UNLOCKED) -->
+  <!-- STEP 2: CREATE & CHECK PAYMENT (UNLOCKED) -->
   <div id="paymentPanel" class="hidden">
     <div class="account-bar">
       <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -188,6 +183,7 @@
       <span id="keyDisplay" class="full-key"></span>
     </div>
 
+    <!-- CREATE PAYMENT SECTION -->
     <h3 style="font-size: 15px; margin-bottom: 10px;">Create Speed Payment</h3>
 
     <label style="font-size: 12px; color: var(--muted);">Amount:</label>
@@ -199,23 +195,24 @@
       <option value="USD">USD ($ Dollars)</option>
     </select>
 
-    <label style="font-size: 12px; color: var(--muted);">Target Currency:</label>
-    <input type="text" value="SATS (Lightning)" disabled style="color: var(--primary);" />
-
     <button id="createPayBtn" class="btn-main" onclick="createPayment()">
       ⚡ Create Payment
     </button>
 
     <div id="paymentStatus" class="status-box"></div>
 
-    <!-- Payment Result with QR Code -->
+    <!-- Active Payment QR & Live Status -->
     <div id="qrResult" class="qr-wrapper hidden">
       <div id="qrcode"></div>
-      <p id="qrTitle" style="font-size: 12px; margin-top: 10px; color: var(--primary); font-weight: bold;">
-        Payment Ready
-      </p>
+      
+      <!-- Live Payment Status Badge -->
+      <div>
+        <div id="liveStatusBadge" class="live-status" style="background:#1e293b; color:#f59e0b;">
+          ⏳ Status: Pending (Waiting for payment...)
+        </div>
+      </div>
 
-      <div id="invoiceContainer" class="hidden">
+      <div id="invoiceContainer" class="hidden" style="margin-top:10px;">
         <div id="invoiceText" class="box"></div>
         <button onclick="copyInvoice()" style="background:#1e293b; color:white; border:none; padding:8px; border-radius:6px; font-size:12px; cursor:pointer; margin-top:8px;">
           Copy Lightning Invoice
@@ -228,52 +225,38 @@
         </a>
       </div>
 
-      <!-- Raw Speed API Response Inspection -->
-      <details style="margin-top: 15px; text-align: left; cursor: pointer;">
-        <summary style="font-size: 11px; color: var(--muted);">View Raw API Response</summary>
-        <pre id="rawResponse"></pre>
-      </details>
+      <button id="manualCheckBtn" onclick="checkCurrentStatus()" style="background:#334155; color:white; border:none; padding:8px 12px; border-radius:6px; font-size:12px; cursor:pointer; margin-top:14px;">
+        🔄 Refresh Status Now
+      </button>
     </div>
+
+    <hr/>
+
+    <!-- LOOKUP ANY PAYMENT BY ID -->
+    <h3 style="font-size: 15px; margin-bottom: 8px;">Check Past Payment Status</h3>
+    <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
+      Paste any Speed Payment ID to view its real-time status:
+    </p>
+    <input type="text" id="lookupIdInput" placeholder="pmt_123456789..." />
+    <button onclick="lookupPaymentStatus()" class="btn-main" style="background:#334155; color:white;">
+      Search Payment Status
+    </button>
+
+    <div id="lookupResult" class="status-box"></div>
   </div>
 </div>
 
 <script>
   let activeKey = localStorage.getItem("speed_verified_key") || "";
+  let currentPaymentId = "";
+  let pollingInterval = null;
 
   if (activeKey) {
     unlockPaymentUI(activeKey);
   }
 
-  // Deep recursive extractor: Finds Lightning invoice (lnbc...) or checkout URLs anywhere in Speed's response
-  function extractPaymentDetails(data) {
-    let invoice = "";
-    let url = "";
-
-    function scan(obj) {
-      if (!obj || typeof obj !== "object") return;
-      for (const [k, v] of Object.entries(obj)) {
-        if (typeof v === "string") {
-          const str = v.trim();
-          // Check for Lightning invoice (mainnet or testnet)
-          if (/^(lnbc|lntb|lightning:)/i.test(str)) {
-            if (!invoice) invoice = str;
-          }
-          // Check for hosted checkout URL
-          else if ((k.toLowerCase().includes("url") || k === "link") && /^https?:\/\//i.test(str)) {
-            if (!url) url = str;
-          }
-        } else if (typeof v === "object") {
-          scan(v);
-        }
-      }
-    }
-
-    scan(data);
-    return { invoice, url };
-  }
-
-  // Official Speed /payments API caller
-  async function callSpeedPaymentApi(body) {
+  // Universal Speed API Caller (GET / POST)
+  async function callSpeedApi(endpoint, method = "GET", body = null) {
     const key = activeKey || document.getElementById("apiKeyInput").value.trim();
     const authHeader = "Basic " + btoa(key + ":");
 
@@ -284,27 +267,22 @@
       "speed-version": "2022-10-15"
     };
 
-    const payload = JSON.stringify(body);
+    const options = {
+      method: method,
+      headers: headers
+    };
+    if (body) options.body = JSON.stringify(body);
 
-    // 1. Try Vercel Rewrite route (/api/speed/payments)
-    let res = await fetch("/api/speed/payments", {
-      method: "POST",
-      headers: headers,
-      body: payload
-    }).catch(() => null);
+    // 1. Try Vercel Rewrite route (/api/speed/...)
+    let res = await fetch(`/api/speed/${endpoint}`, options).catch(() => null);
 
-    // 2. Fallback to direct speed API
+    // 2. Direct fallback
     if (!res || !res.ok) {
-      const directRes = await fetch("https://api.tryspeed.com/payments", {
-        method: "POST",
-        headers: headers,
-        body: payload
-      }).catch(() => null);
-
+      const directRes = await fetch(`https://api.tryspeed.com/${endpoint}`, options).catch(() => null);
       if (directRes) res = directRes;
     }
 
-    if (!res) throw new Error("Could not connect to Speed servers.");
+    if (!res) throw new Error("Could not connect to Speed.app servers.");
 
     const text = await res.text();
     let data = {};
@@ -325,25 +303,20 @@
     const status = document.getElementById("verifyStatus");
 
     if (!key) return alert("Please enter your Speed Secret Key.");
-    if (!key.startsWith("sk_test_") && !key.startsWith("sk_live_")) {
-      return alert("Invalid key format. Speed Secret Keys start with 'sk_test_' or 'sk_live_'.");
-    }
-
     btn.disabled = true;
     btn.innerText = "Verifying with Speed.app...";
     status.style.display = "block";
     status.className = "status-box";
-    status.innerText = "Authenticating with Speed API (/payments)...";
+    status.innerText = "Authenticating with Speed API...";
 
     try {
-      const testPayload = {
+      // Test payload to verify key
+      await callSpeedApi("payments", "POST", {
         amount: 10,
         currency: "SATS",
         target_currency: "SATS",
         payment_methods: ["lightning"]
-      };
-
-      await callSpeedPaymentApi(testPayload);
+      });
 
       activeKey = key;
       localStorage.setItem("speed_verified_key", key);
@@ -370,12 +343,13 @@
   }
 
   function disconnectKey() {
+    if (pollingInterval) clearInterval(pollingInterval);
     localStorage.removeItem("speed_verified_key");
     activeKey = "";
     location.reload();
   }
 
-  // 2. CREATE PAYMENT
+  // 2. CREATE PAYMENT & START AUTO-POLLING
   async function createPayment() {
     const amount = parseFloat(document.getElementById("payAmount").value);
     const currency = document.getElementById("payCurrency").value;
@@ -391,48 +365,39 @@
     qrResult.classList.add("hidden");
 
     try {
-      const payload = {
+      const payment = await callSpeedApi("payments", "POST", {
         amount: amount,
         currency: currency,
         target_currency: "SATS",
         payment_methods: ["lightning"]
-      };
+      });
 
-      const payment = await callSpeedPaymentApi(payload);
+      currentPaymentId = payment.id;
 
-      // Deep search for invoice (lnbc...) or hosted checkout URL
+      // Extract invoice or URL
       const { invoice, url } = extractPaymentDetails(payment);
-
       const qrTarget = invoice || url || payment.id;
+
       const qrDiv = document.getElementById("qrcode");
       qrDiv.innerHTML = "";
       new QRCode(qrDiv, { text: qrTarget, width: 170, height: 170 });
 
-      // Invoice container
       if (invoice) {
         document.getElementById("invoiceText").innerText = invoice;
         document.getElementById("invoiceContainer").classList.remove("hidden");
-        document.getElementById("qrTitle").innerText = "Scan with Speed Wallet or any Lightning App";
-      } else {
-        document.getElementById("invoiceContainer").classList.add("hidden");
       }
-
-      // Hosted checkout link
       if (url) {
         document.getElementById("checkoutLink").href = url;
         document.getElementById("urlContainer").classList.remove("hidden");
-      } else {
-        document.getElementById("urlContainer").classList.add("hidden");
       }
 
-      // Output Raw Response for debugging
-      document.getElementById("rawResponse").innerText = JSON.stringify(payment, null, 2);
-
       qrResult.classList.remove("hidden");
-
       status.style.display = "block";
       status.className = "status-box status-success";
-      status.innerText = `✓ Payment created successfully! ID: ${payment.id}`;
+      status.innerText = `✓ Payment Created! ID: ${payment.id}`;
+
+      // Start automatically checking status every 3 seconds
+      startAutoPolling(payment.id);
     } catch (err) {
       status.style.display = "block";
       status.className = "status-box status-error";
@@ -443,9 +408,106 @@
     }
   }
 
+  // 3. AUTOMATIC STATUS POLLING (Checks every 3 seconds)
+  function startAutoPolling(paymentId) {
+    if (pollingInterval) clearInterval(pollingInterval);
+
+    const badge = document.getElementById("liveStatusBadge");
+    badge.innerText = "⏳ Status: Pending (Waiting for payment...)";
+    badge.style.background = "#1e293b";
+    badge.style.color = "#f59e0b";
+
+    pollingInterval = setInterval(async () => {
+      try {
+        const payment = await callSpeedApi(`payments/${paymentId}`, "GET");
+        const st = (payment.status || "").toLowerCase();
+
+        if (st === "succeeded" || st === "paid") {
+          clearInterval(pollingInterval);
+          badge.innerText = "✅ Status: PAID / SUCCEEDED!";
+          badge.style.background = "#022c22";
+          badge.style.color = "#4ade80";
+          alert("⚡ Payment Confirmed! Satoshis have been received.");
+        } else if (st === "failed" || st === "canceled" || st === "expired") {
+          clearInterval(pollingInterval);
+          badge.innerText = `❌ Status: ${st.toUpperCase()}`;
+          badge.style.background = "#450a0a";
+          badge.style.color = "#f87171";
+        }
+      } catch (e) {
+        console.warn("Polling status error:", e.message);
+      }
+    }, 3000);
+  }
+
+  // Manual Check Button on Active Payment
+  async function checkCurrentStatus() {
+    if (!currentPaymentId) return;
+    const btn = document.getElementById("manualCheckBtn");
+    btn.innerText = "Checking...";
+    try {
+      const payment = await callSpeedApi(`payments/${currentPaymentId}`, "GET");
+      alert(`Current Status: ${payment.status.toUpperCase()}\nAmount: ${payment.amount} ${payment.currency}`);
+    } catch (e) {
+      alert("Error checking status: " + e.message);
+    } finally {
+      btn.innerText = "🔄 Refresh Status Now";
+    }
+  }
+
+  // 4. MANUAL LOOKUP BY PAYMENT ID
+  async function lookupPaymentStatus() {
+    const id = document.getElementById("lookupIdInput").value.trim();
+    const resultBox = document.getElementById("lookupResult");
+
+    if (!id) return alert("Please enter a Payment ID (pmt_...)");
+
+    resultBox.style.display = "block";
+    resultBox.className = "status-box";
+    resultBox.innerText = "Fetching payment details from Speed.app...";
+
+    try {
+      const payment = await callSpeedApi(`payments/${id}`, "GET");
+      const isPaid = payment.status === "succeeded" || payment.status === "paid";
+
+      resultBox.className = `status-box ${isPaid ? 'status-success' : 'status-error'}`;
+      resultBox.innerHTML = `
+        <strong>Payment ID:</strong> ${payment.id}<br/>
+        <strong>Status:</strong> ${payment.status.toUpperCase()}<br/>
+        <strong>Amount:</strong> ${payment.amount} ${payment.currency}<br/>
+        <strong>Created:</strong> ${new Date(payment.created * 1000).toLocaleString()}
+      `;
+    } catch (err) {
+      resultBox.className = "status-box status-error";
+      resultBox.innerText = "Lookup failed: " + err.message;
+    }
+  }
+
+  // Extractor Helper
+  function extractPaymentDetails(data) {
+    let invoice = "";
+    let url = "";
+    function scan(obj) {
+      if (!obj || typeof obj !== "object") return;
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === "string") {
+          const str = v.trim();
+          if (/^(lnbc|lntb|lightning:)/i.test(str)) {
+            if (!invoice) invoice = str;
+          } else if ((k.toLowerCase().includes("url") || k === "link") && /^https?:\/\//i.test(str)) {
+            if (!url) url = str;
+          }
+        } else if (typeof v === "object") {
+          scan(v);
+        }
+      }
+    }
+    scan(data);
+    return { invoice, url };
+  }
+
   function copyInvoice() {
-    const text = document.getElementById("invoiceText").innerText;
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(document.getElementById("invoiceText").innerText);
     alert("Lightning invoice copied!");
   }
 </script>
